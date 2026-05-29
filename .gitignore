@@ -1,0 +1,59 @@
+# --- Secrets (never commit) ---
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# --- Python ---
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.egg-info/
+.eggs/
+pip-log.txt
+pip-delete-this-directory.txt
+
+# --- Node / frontend ---
+node_modules/
+frontend/dist/
+dist-ssr/
+*.tsbuildinfo
+
+# --- Logs ---
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# --- Notebooks (outputs, not source) ---
+notebooks/.ipynb_checkpoints/
+notebooks/openai_usage_log.csv
+notebooks/openai_responses.csv
+
+# --- OS / editor ---
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
+*~
+
+# --- Capacitor / mobile (when you add iOS) ---
+ios/
+android/
+.capacitor/
+
+# --- Optional local tooling ---
+.cursor/

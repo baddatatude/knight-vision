@@ -1,0 +1,14 @@
+{
+  "name": "knight-vision",
+  "private": true,
+  "scripts": {
+    "dev": "concurrently -k -n api,web -c blue,green \"npm run dev:api\" \"npm run dev:web\"",
+    "dev:api": "set -a && [ -f .env ] && . ./.env; set +a && .venv/bin/uvicorn main:app --reload --reload-dir backend --host ${API_HOST:-127.0.0.1} --port ${API_PORT:-8000} --app-dir backend",
+    "dev:web": "npm run dev --prefix frontend",
+    "build:web": "npm run build --prefix frontend",
+    "preview:web": "npm run preview --prefix frontend"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}

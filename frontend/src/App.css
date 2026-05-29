@@ -1,0 +1,372 @@
+.app {
+  padding: 1.25rem 1.5rem 2rem;
+  text-align: left;
+}
+
+.header h1 {
+  margin: 0 0 0.25rem;
+  font-size: 1.75rem;
+  letter-spacing: -0.02em;
+}
+
+.tagline {
+  margin: 0 0 1.25rem;
+  max-width: 42rem;
+  color: var(--muted);
+}
+
+.layout {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.75rem;
+  align-items: flex-start;
+}
+
+.board-wrap {
+  flex: 0 0 auto;
+  width: min(92vw, 560px);
+}
+
+.capture-zone {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.35rem 0.55rem;
+  background: var(--surface);
+}
+
+.capture-zone--black {
+  margin-bottom: 0.5rem;
+}
+
+.capture-zone--white {
+  margin-top: 0.5rem;
+}
+
+.capture-zone-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.35rem 0.75rem;
+  margin-bottom: 0.15rem;
+}
+
+.capture-zone-title {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.material-score {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.35rem 0.5rem;
+  font-size: 0.85rem;
+}
+
+.material-score-label {
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.material-score-nums {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  font-size: 1.05rem;
+  color: var(--text);
+}
+
+.capture-pieces {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.1rem 0.2rem;
+  min-height: 1.85rem;
+}
+
+.capture-empty {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.capture-glyph {
+  font-size: 1.65rem;
+  line-height: 1;
+  user-select: none;
+}
+
+.capture-glyph--black {
+  filter: drop-shadow(0 1px 0 rgba(255, 255, 255, 0.15));
+}
+
+.capture-glyph--white {
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.4));
+}
+
+.board-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+.board-toolbar .icon-btn {
+  min-width: 2.25rem;
+  padding-inline: 0.5rem;
+  font-size: 1.1rem;
+  line-height: 1;
+}
+
+.board-hint {
+  margin-top: 0.5rem;
+  max-width: 36rem;
+}
+
+.board-toolbar button:hover {
+  border-color: var(--accent);
+}
+
+.board-toolbar button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.primary.secondary {
+  margin-top: 0.5rem;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+
+.primary.secondary:not(:disabled):hover {
+  border-color: var(--accent);
+  filter: none;
+}
+
+.plan-walkthrough {
+  margin-top: 0.75rem;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  background: rgba(37, 99, 235, 0.06);
+}
+
+.plan-walkthrough-title {
+  margin: 0 0 0.5rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.plan-toolbar {
+  margin-top: 0;
+}
+
+.plan-step-list {
+  margin: 0.5rem 0 0;
+  padding-left: 1.25rem;
+  font-size: 0.88rem;
+  max-height: 10rem;
+  overflow-y: auto;
+}
+
+.plan-step-list button {
+  font: inherit;
+  background: none;
+  border: none;
+  padding: 0.15rem 0;
+  cursor: pointer;
+  color: var(--text);
+  text-align: left;
+}
+
+.plan-step-list button:hover {
+  color: var(--accent);
+}
+
+.plan-step-active {
+  font-weight: 700;
+  color: var(--accent) !important;
+}
+
+.plan-narrative {
+  margin-top: 0.75rem;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--code-bg, var(--surface));
+}
+
+.plan-narrative h3 {
+  margin: 0 0 0.5rem;
+  font-size: 0.95rem;
+}
+
+.plan-narrative-body {
+  font-size: 0.9rem;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  max-height: 14rem;
+  overflow-y: auto;
+}
+
+.plan-summary {
+  margin: 0.65rem 0 0;
+  font-size: 0.88rem;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.plan-step-explanation {
+  margin: 0.65rem 0 0.5rem;
+  padding: 0.65rem 0.75rem;
+  border-radius: 8px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+}
+
+.plan-step-explanation-title {
+  margin: 0 0 0.35rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.plan-step-explanation p {
+  margin: 0;
+  font-size: 0.92rem;
+  line-height: 1.55;
+}
+
+.status {
+  margin: 0.75rem 0 0;
+  font-size: 0.95rem;
+  color: var(--muted);
+}
+
+.opening-line {
+  margin-top: 0.35rem;
+}
+
+.opening-line strong {
+  color: var(--text);
+  margin-right: 0.35rem;
+}
+
+.sidebar {
+  flex: 1 1 280px;
+  min-width: 260px;
+  max-width: 400px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1rem 1.1rem;
+  background: var(--surface);
+}
+
+.sidebar h2 {
+  margin: 0 0 0.5rem;
+  font-size: 1.05rem;
+}
+
+.sidebar h2:not(:first-child) {
+  margin-top: 1.25rem;
+}
+
+.check {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-start;
+  margin-bottom: 0.65rem;
+  cursor: pointer;
+  font-size: 0.95rem;
+}
+
+.check input {
+  margin-top: 0.2rem;
+}
+
+.hint {
+  margin: 0 0 0.25rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.hint code {
+  font-size: 0.8rem;
+}
+
+.engine-meta {
+  margin: 0 0 0.75rem;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
+.field {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.65rem;
+}
+
+.field input[type='number'] {
+  width: 4.5rem;
+  font: inherit;
+  padding: 0.25rem 0.4rem;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+}
+
+.primary {
+  font: inherit;
+  padding: 0.45rem 0.9rem;
+  border-radius: 6px;
+  border: none;
+  background: var(--accent);
+  color: var(--accent-fg);
+  cursor: pointer;
+}
+
+.primary:disabled {
+  opacity: 0.65;
+  cursor: wait;
+}
+
+.primary:not(:disabled):hover {
+  filter: brightness(1.05);
+}
+
+.eval-out {
+  margin-top: 0.75rem;
+  font-size: 0.95rem;
+  line-height: 1.5;
+}
+
+.eval-out .pv {
+  word-break: break-all;
+}
+
+.error {
+  color: var(--danger);
+  font-size: 0.9rem;
+  margin: 0.5rem 0 0;
+}
+
+/* Centered on the piece (squareRenderer overlay), not the whole square */
+.undefended-piece-dot {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: clamp(9px, 20%, 15px);
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: #dc2626;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.28);
+  pointer-events: none;
+  z-index: 6;
+}
