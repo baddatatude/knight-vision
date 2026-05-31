@@ -1,0 +1,16 @@
+.git
+.gitignore
+.venv
+node_modules
+frontend/node_modules
+frontend/dist
+**/__pycache__
+**/*.pyc
+.env
+.env.*
+!.env.example
+notebooks/.ipynb_checkpoints
+*.md
+!docs/RAILWAY.md
+.cursor
+terminals

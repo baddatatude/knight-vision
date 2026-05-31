@@ -94,6 +94,10 @@ For a **built** UI without the Vite dev server, set `VITE_API_BASE` and run `npm
 
 See `frontend/docs/CAPACITOR.md` for wrapping the build in an iOS app.
 
+## Deploy on Railway
+
+See **[docs/RAILWAY.md](docs/RAILWAY.md)** — Docker image with Stockfish, API, and built UI for GitHub → Railway (e.g. baddatatude).
+
 ## Environment variables
 
 | Variable | Where | Purpose |

@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import chess
 import chess.engine
 from fastapi import FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from openai import APIConnectionError, APIStatusError, AuthenticationError, RateLimitError
 from pydantic import BaseModel, Field
 
@@ -30,6 +33,9 @@ from openai_explain import attach_explanations_to_steps, explain_plan_narrative
 from pv_plan import build_plan_steps
 from rate_limit import RateLimitMiddleware
 from validation import validate_fen, validate_moves_uci
+
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+_FRONTEND_DIST = _REPO_ROOT / "frontend" / "dist"
 
 app = FastAPI(title="Knight Vision Chess API", version="0.2.0")
 register_exception_handlers(app)
@@ -135,20 +141,21 @@ def _run_openai_explain(
         ) from e
 
 
-@app.get("/")
-def root() -> dict[str, str]:
-    """API has no web UI — open the Vite dev server for the chess board."""
-    return {
-        "service": "Knight Vision API",
-        "ui_dev": "http://localhost:5173",
-        "health": "/health",
-        "docs": "/docs",
-    }
-
-
 @app.get("/favicon.ico", include_in_schema=False)
 def favicon() -> Response:
     return Response(status_code=204)
+
+
+if not _FRONTEND_DIST.is_dir():
+
+    @app.get("/")
+    def root() -> dict[str, str]:
+        return {
+            "service": "Knight Vision API",
+            "ui_dev": "http://localhost:5173",
+            "health": "/health",
+            "docs": "/docs",
+        }
 
 
 @app.get("/health")
@@ -301,3 +308,11 @@ def engine_status() -> dict[str, str | bool]:
         "path": raw,
         "error": "Engine binary not found or not executable",
     }
+
+
+if _FRONTEND_DIST.is_dir():
+    app.mount(
+        "/",
+        StaticFiles(directory=_FRONTEND_DIST, html=True),
+        name="frontend",
+    )

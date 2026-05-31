@@ -60,6 +60,11 @@ def api_port() -> int:
 def cors_origins() -> list[str]:
     """Comma-separated CORS_ORIGINS; merged with dev defaults when ENV=development."""
     extra = [o.strip() for o in _env("CORS_ORIGINS").split(",") if o.strip()]
+    railway_host = _env("RAILWAY_PUBLIC_DOMAIN")
+    if railway_host:
+        for origin in (f"https://{railway_host}", f"http://{railway_host}"):
+            if origin not in extra:
+                extra.append(origin)
     if _env("ENV", "development").lower() == "development":
         defaults = [
             "http://127.0.0.1:5173",
