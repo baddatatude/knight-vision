@@ -118,6 +118,39 @@
   margin-top: 0.75rem;
 }
 
+.board-toolbar--quiz {
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem 0.75rem;
+}
+
+.board-toolbar-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.board-toolbar-quit {
+  margin-left: auto;
+  font: inherit;
+  padding: 0.35rem 0.75rem;
+  border-radius: 6px;
+  border: 1px solid var(--danger);
+  background: transparent;
+  color: var(--danger);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.board-toolbar-quit:hover {
+  background: rgba(185, 28, 28, 0.1);
+}
+
+.board-toolbar-retry {
+  flex-shrink: 0;
+}
+
 .board-menu {
   margin-top: 0.85rem;
   width: 100%;
@@ -464,9 +497,31 @@
   padding: 0.1rem 0;
 }
 
+.plan-step-explanation-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.35rem;
+}
+
+.plan-step-explanation-header .plan-step-explanation-title {
+  margin: 0;
+  flex: 1;
+  min-width: 0;
+}
+
+.plan-step-explanation--intro-minimized .plan-step-explanation-header {
+  margin-bottom: 0;
+}
+
 .study-annotation-area .plan-step-explanation {
   margin: 0;
   min-height: 10rem;
+}
+
+.study-annotation-area .plan-step-explanation--intro-minimized {
+  min-height: 0;
 }
 
 .study-annotation-area .plan-step-explanation p {

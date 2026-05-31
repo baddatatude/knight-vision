@@ -528,6 +528,8 @@ export default function App() {
     })
   }
   const [studyMinimized, setStudyMinimized] = useState(false)
+  const [walkthroughIntroMinimized, setWalkthroughIntroMinimized] =
+    useState(false)
   const [studyNavMode, setStudyNavMode] = useState<'all' | 'highlights'>('all')
 
   const fen = useMemo(() => {
@@ -1182,6 +1184,7 @@ export default function App() {
     setOpeningTitle(null)
     setStudyNavMode('all')
     setStudyMinimized(false)
+    setWalkthroughIntroMinimized(false)
   }
 
   const endOpeningQuiz = () => {
@@ -1288,8 +1291,9 @@ export default function App() {
       setVsEngineMode('off')
       setLine({ moves: [], cursor: 0 })
       setEnginePlayError(null)
-      openBoardMenuSection('learn')
+      setBoardMenuOpen({ overlays: false, learn: false, bot: false })
       setLearnSubOpen({ study: true, openings: false })
+      setWalkthroughIntroMinimized(false)
     } catch (e: unknown) {
       setStudyError(
         e instanceof ApiClientError
@@ -1612,16 +1616,43 @@ export default function App() {
       </div>
     ) : null
 
+  const walkthroughIntroTitle = studyActive
+    ? 'Before this game'
+    : openingTitle
+      ? 'Before the line'
+      : 'Start'
+
   const planExplanation = planStepExplanation ? (
-    <div className="plan-step-explanation" aria-live="polite">
-      <h3 className="plan-step-explanation-title">
-        {planStep === 0
-          ? 'Before the line'
-          : planData?.steps[planStep - 1]
-            ? formatPlanMoveLabel(planData.steps[planStep - 1])
-            : `Move ${planStep}`}
-      </h3>
-      <p>{planStepExplanation}</p>
+    <div
+      className={`plan-step-explanation${
+        planStep === 0 && walkthroughIntroMinimized
+          ? ' plan-step-explanation--intro-minimized'
+          : ''
+      }`}
+      aria-live="polite"
+    >
+      <div className="plan-step-explanation-header">
+        <h3 className="plan-step-explanation-title">
+          {planStep === 0
+            ? walkthroughIntroTitle
+            : planData?.steps[planStep - 1]
+              ? formatPlanMoveLabel(planData.steps[planStep - 1])
+              : `Move ${planStep}`}
+        </h3>
+        {planStep === 0 && walkthroughActive ? (
+          <button
+            type="button"
+            className="panel-toggle"
+            aria-expanded={!walkthroughIntroMinimized}
+            onClick={() => setWalkthroughIntroMinimized((m) => !m)}
+          >
+            {walkthroughIntroMinimized ? 'Show' : 'Minimize'}
+          </button>
+        ) : null}
+      </div>
+      {!(planStep === 0 && walkthroughIntroMinimized) ? (
+        <p>{planStepExplanation}</p>
+      ) : null}
     </div>
   ) : null
 
@@ -1899,48 +1930,60 @@ export default function App() {
   )
 
   const quizBoardToolbar = (
-    <div className="board-toolbar">
-      <button
-        type="button"
-        className="icon-btn"
-        aria-label="Previous position"
-        title="Step back through game moves"
-        disabled={cursor === 0}
-        onClick={historyBack}
-      >
-        ←
+    <div className="board-toolbar board-toolbar--quiz">
+      <div className="board-toolbar-group">
+        <button
+          type="button"
+          className="icon-btn"
+          aria-label="Previous position"
+          title="Step back through game moves"
+          disabled={cursor === 0}
+          onClick={historyBack}
+        >
+          ←
+        </button>
+        <button
+          type="button"
+          className="icon-btn"
+          aria-label="Next position"
+          title="Step forward in the quiz line"
+          disabled={cursor === moves.length}
+          onClick={historyForward}
+        >
+          →
+        </button>
+        <button
+          type="button"
+          onClick={undo}
+          title="Remove the last move from the line"
+          disabled={cursor !== moves.length || moves.length === 0}
+        >
+          Undo
+        </button>
+        <button type="button" onClick={reset}>
+          New game
+        </button>
+        <button
+          type="button"
+          onClick={() =>
+            setBoardOrientation((o) => (o === 'white' ? 'black' : 'white'))
+          }
+        >
+          Flip board
+        </button>
+      </div>
+      <button type="button" className="board-toolbar-quit" onClick={endOpeningQuiz}>
+        Quit quiz
       </button>
-      <button
-        type="button"
-        className="icon-btn"
-        aria-label="Next position"
-        title="Step forward in the quiz line"
-        disabled={cursor === moves.length}
-        onClick={historyForward}
-      >
-        →
-      </button>
-      <button
-        type="button"
-        onClick={undo}
-        title="Remove the last move from the line"
-        disabled={
-          cursor !== moves.length || moves.length === 0
-        }
-      >
-        Undo
-      </button>
-      <button type="button" onClick={reset}>
-        New game
-      </button>
-      <button
-        type="button"
-        onClick={() =>
-          setBoardOrientation((o) => (o === 'white' ? 'black' : 'white'))
-        }
-      >
-        Flip board
-      </button>
+      {openingQuizComplete ? (
+        <button
+          type="button"
+          className="primary board-toolbar-retry"
+          onClick={startOpeningQuiz}
+        >
+          Try again
+        </button>
+      ) : null}
     </div>
   )
 
@@ -2252,16 +2295,6 @@ export default function App() {
                   {openingQuizError ? (
                     <p className="opening-quiz-banner-error">{openingQuizError}</p>
                   ) : null}
-                  <div className="opening-quiz-banner-actions">
-                    <button type="button" onClick={endOpeningQuiz}>
-                      End quiz
-                    </button>
-                    {openingQuizComplete ? (
-                      <button type="button" className="primary" onClick={startOpeningQuiz}>
-                        Try again
-                      </button>
-                    ) : null}
-                  </div>
                 </div>
               ) : null}
               {showCapturedPieces ? (
