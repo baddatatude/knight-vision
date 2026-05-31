@@ -2,6 +2,19 @@ import { apiRequest } from './apiClient'
 
 export type AttackKind = 'none' | 'white' | 'black' | 'both'
 
+export type PieceRef = {
+  square: string
+  color: 'white' | 'black'
+  type: string
+}
+
+export type PieceContacts = {
+  square: string
+  piece: { color: 'white' | 'black'; type: string }
+  defenders: PieceRef[]
+  attackers: PieceRef[]
+}
+
 export type OpeningInfo = {
   eco: string | null
   name: string | null
@@ -10,17 +23,28 @@ export type OpeningInfo = {
   line_depth?: number
 }
 
+export type SideOpenings = {
+  line: OpeningInfo
+  white: OpeningInfo | null
+  black: OpeningInfo | null
+}
+
 export type AnalyzeResponse = {
   fen: string
   turn: 'white' | 'black'
   attacks: Record<string, AttackKind>
+  piece_contacts: Record<string, PieceContacts>
+  /** Squares each occupied square's piece attacks (for threat circles). */
+  piece_threats: Record<string, string[]>
   undefended: { white: string[]; black: string[] }
   legal_moves_uci: string[]
   is_check: boolean
   is_checkmate: boolean
   is_stalemate: boolean
   is_insufficient_material: boolean
+  /** Full line (same as openings.line). */
   opening: OpeningInfo
+  openings: SideOpenings
 }
 
 export type EngineEvalResponse = {
@@ -29,6 +53,20 @@ export type EngineEvalResponse = {
   cp_white: number | null
   mate_white: number | null
 }
+
+export type MoveQualityResponse = {
+  played_uci: string
+  best_uci: string
+  cp_loss: number
+  classification: string
+  accuracy_depth: number
+  mover: 'white' | 'black'
+}
+
+/** Engine plays / eval / plan — user-adjustable (default 12). */
+export const ENGINE_DEPTH_DEFAULT = 12
+/** Fast accuracy scoring — fixed, separate from engine depth. */
+export const ACCURACY_DEPTH = 6
 
 export type EngineStatusResponse = {
   ok: boolean
@@ -66,6 +104,17 @@ export async function engineEval(
   })
 }
 
+export async function scoreMoveQuality(
+  fen: string,
+  playedUci: string,
+  depth: number = ACCURACY_DEPTH,
+): Promise<MoveQualityResponse> {
+  return apiRequest<MoveQualityResponse>('/api/engine/move-quality', {
+    method: 'POST',
+    body: JSON.stringify({ fen, played_uci: playedUci, depth }),
+  })
+}
+
 export async function engineStatus(): Promise<EngineStatusResponse> {
   return apiRequest<EngineStatusResponse>('/api/engine/status')
 }
@@ -86,6 +135,8 @@ export type PlanStep = {
   legal_moves_count: number
   events: { type: string; piece?: string; squares?: string[]; count?: number }[]
   explanation?: string
+  visual_interest?: number
+  labels?: string[]
 }
 
 export type EnginePlanResponse = {
@@ -100,6 +151,7 @@ export type EnginePlanResponse = {
   summary: string | null
   explain_error: string | null
   explain_code?: string | null
+  highlight_plies?: number[]
 }
 
 export async function enginePlan(
@@ -121,6 +173,41 @@ export async function enginePlan(
 
 export async function openaiStatus(): Promise<{ configured: boolean }> {
   return apiRequest<{ configured: boolean }>('/api/openai/status')
+}
+
+export type StudyGameCatalogEntry = {
+  id: string
+  name: string
+  white: string
+  black: string
+  event: string
+  year: number
+  tags: string[]
+}
+
+export type StudyLessonResponse = EnginePlanResponse & {
+  game_id: string
+  title: string
+  white: string
+  black: string
+  event: string
+  year: number
+  tags: string[]
+  moves_uci: string[]
+  annotation_plies: number[]
+  highlight_plies?: number[]
+}
+
+export async function fetchStudyCatalog(): Promise<{
+  games: StudyGameCatalogEntry[]
+}> {
+  return apiRequest<{ games: StudyGameCatalogEntry[] }>('/api/study/catalog')
+}
+
+export async function fetchStudyLesson(
+  gameId: string,
+): Promise<StudyLessonResponse> {
+  return apiRequest<StudyLessonResponse>(`/api/study/lessons/${gameId}`)
 }
 
 export async function healthCheck(): Promise<{ status: string }> {

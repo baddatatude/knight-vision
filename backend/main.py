@@ -2,21 +2,30 @@ from __future__ import annotations
 
 import chess
 import chess.engine
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 from openai import APIConnectionError, APIStatusError, AuthenticationError, RateLimitError
 from pydantic import BaseModel, Field
 
-from analysis import compute_attack_map, compute_undefended, legal_moves_uci
+from analysis import (
+    compute_attack_map,
+    compute_piece_contacts,
+    compute_piece_threats,
+    compute_undefended,
+    legal_moves_uci,
+)
 from config import cors_origins, openai_api_key
+from errors import register_exception_handlers
 from engine_uci import (
     default_stockfish_path,
     engine_analyse,
     reset_engine,
     resolved_engine_binary,
 )
-from errors import EngineError, OpenAIError, register_exception_handlers
-from openings_db import classify_opening
+from famous_games import catalog_dict, get_famous_game
+from lesson_builder import load_or_build_lesson
+from move_quality import score_move
+from openings_db import classify_opening, classify_side_openings
 from openai_explain import attach_explanations_to_steps, explain_plan_narrative
 from pv_plan import build_plan_steps
 from rate_limit import RateLimitMiddleware
@@ -55,6 +64,12 @@ class EnginePlanBody(BaseModel):
     depth: int = Field(12, ge=1, le=40)
     user_color: str = Field("white", pattern="^(white|black)$")
     explain: bool = Field(True, description="Call OpenAI for numbered English summary")
+
+
+class MoveQualityBody(BaseModel):
+    fen: str = Field(..., min_length=10, max_length=120)
+    played_uci: str = Field(..., min_length=4, max_length=5)
+    depth: int = Field(6, ge=1, le=40, description="Lower depth for fast accuracy scoring")
 
 
 def _run_engine(fen: str, *, depth: int, movetime_ms: int | None = None) -> dict:
@@ -120,6 +135,22 @@ def _run_openai_explain(
         ) from e
 
 
+@app.get("/")
+def root() -> dict[str, str]:
+    """API has no web UI — open the Vite dev server for the chess board."""
+    return {
+        "service": "Knight Vision API",
+        "ui_dev": "http://localhost:5173",
+        "health": "/health",
+        "docs": "/docs",
+    }
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon() -> Response:
+    return Response(status_code=204)
+
+
 @app.get("/health")
 @app.get("/api/health")
 def health() -> dict[str, str]:
@@ -137,18 +168,21 @@ def analyze(body: FenBody) -> dict:
     board = validate_fen(body.fen)
     moves_uci = validate_moves_uci(body.moves_uci)
     uw, ub = compute_undefended(board)
-    opening = classify_opening(moves_uci)
+    opening = classify_side_openings(moves_uci)
     return {
         "fen": board.fen(),
         "turn": "white" if board.turn == chess.WHITE else "black",
         "attacks": compute_attack_map(board),
+        "piece_contacts": compute_piece_contacts(board),
+        "piece_threats": compute_piece_threats(board),
         "undefended": {"white": uw, "black": ub},
         "legal_moves_uci": legal_moves_uci(board),
         "is_check": board.is_check(),
         "is_checkmate": board.is_checkmate(),
         "is_stalemate": board.is_stalemate(),
         "is_insufficient_material": board.is_insufficient_material(),
-        "opening": opening,
+        "opening": opening["line"],
+        "openings": opening,
     }
 
 
@@ -156,6 +190,36 @@ def analyze(body: FenBody) -> dict:
 def engine_eval(body: EngineEvalBody) -> dict:
     validate_fen(body.fen)
     return _run_engine(body.fen, depth=body.depth, movetime_ms=body.movetime_ms)
+
+
+@app.post("/api/engine/move-quality")
+def engine_move_quality(body: MoveQualityBody) -> dict:
+    """Score one move vs engine best (typically depth 6 for user accuracy)."""
+    validate_fen(body.fen)
+    played = body.played_uci.strip().lower()
+    if len(played) < 4:
+        raise HTTPException(status_code=400, detail="played_uci is required")
+    try:
+        return score_move(body.fen, played, depth=body.depth)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except FileNotFoundError as e:
+        raise EngineError(
+            "Stockfish is not installed or STOCKFISH_PATH is wrong.",
+            code="engine_not_found",
+        ) from e
+    except chess.engine.EngineTerminatedError as e:
+        reset_engine()
+        raise EngineError(
+            "Engine stopped unexpectedly. Retry move scoring.",
+            code="engine_terminated",
+        ) from e
+    except Exception as e:  # noqa: BLE001
+        reset_engine()
+        raise EngineError(
+            "Move scoring failed. Try again in a moment.",
+            code="engine_error",
+        ) from e
 
 
 @app.post("/api/engine/plan")
@@ -207,6 +271,22 @@ def engine_plan(body: EnginePlanBody) -> dict:
         "explain_error": explain_error,
         "explain_code": explain_code,
     }
+
+
+@app.get("/api/study/catalog")
+def study_catalog() -> dict:
+    """Famous games available for step-through study."""
+    return {"games": catalog_dict()}
+
+
+@app.get("/api/study/lessons/{game_id}")
+def study_lesson(game_id: str) -> dict:
+    """Lesson JSON: full move list + visual-awareness explanations where generated."""
+    try:
+        get_famous_game(game_id)
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    return load_or_build_lesson(game_id)
 
 
 @app.get("/api/engine/status")

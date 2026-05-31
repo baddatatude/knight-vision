@@ -40,6 +40,15 @@ def openai_api_key() -> str | None:
     return None
 
 
+def openai_admin_key() -> str | None:
+    """Admin key with api.usage.read — for organization usage/costs queries only."""
+    for name in ("OPENAI_ADMIN_KEY", "OPENAI_ADMIN_API_KEY"):
+        key = _env(name)
+        if key:
+            return key
+    return None
+
+
 def api_host() -> str:
     return _env("API_HOST", "127.0.0.1")
 

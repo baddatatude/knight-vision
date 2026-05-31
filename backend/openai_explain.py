@@ -9,6 +9,7 @@ import chess
 from openai import OpenAI
 
 from config import openai_api_key
+from openai_usage_log import log_call
 from pv_plan import build_plan_steps, plan_facts_for_prompt
 
 
@@ -75,6 +76,16 @@ def explain_plan_narrative(
         ],
     )
     raw = (response.choices[0].message.content or "").strip()
+    prompt_tokens = response.usage.prompt_tokens if response.usage else 0
+    completion_tokens = response.usage.completion_tokens if response.usage else 0
+    log_call(
+        kind="engine_plan_explain",
+        label=f"Stockfish plan ({n} plies, {side})",
+        model="gpt-4o-mini",
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        source="api",
+    )
     parsed = _parse_explain_json(raw, n)
 
     intro = str(parsed.get("intro", "")).strip()

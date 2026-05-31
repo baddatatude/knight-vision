@@ -40,6 +40,7 @@ pnpm-debug.log*
 notebooks/.ipynb_checkpoints/
 notebooks/openai_usage_log.csv
 notebooks/openai_responses.csv
+data/openai_usage.csv
 
 # --- OS / editor ---
 .DS_Store
