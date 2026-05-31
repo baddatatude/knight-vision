@@ -1,5 +1,6 @@
 import { Chess, type Square } from 'chess.js'
 import { storedMoveToUci } from './api'
+import { OPENING_LINES } from './openingLines'
 
 export type WhiteOpeningPreset = {
   id: string
@@ -20,31 +21,11 @@ export const WHITE_OPENING_PRESETS: WhiteOpeningPreset[] = [
     name: 'Stockfish chooses (no fixed line)',
     movesUci: [],
   },
-  {
-    id: 'london',
-    name: 'London System',
-    movesUci: ['d2d4', 'd7d5', 'c1f4', 'g8f6', 'e2e3', 'e7e6', 'g1f3', 'f8d6'],
-  },
-  {
-    id: 'italian',
-    name: 'Italian Game',
-    movesUci: ['e2e4', 'e7e5', 'g1f3', 'b8c6', 'f1c4'],
-  },
-  {
-    id: 'queens_gambit',
-    name: "Queen's Gambit",
-    movesUci: ['d2d4', 'd7d5', 'c2c4', 'e7e6', 'b1c3', 'g8f6'],
-  },
-  {
-    id: 'kings_pawn',
-    name: "King's Pawn (1. e4)",
-    movesUci: ['e2e4', 'e7e5', 'g1f3', 'b8c6'],
-  },
-  {
-    id: 'english',
-    name: 'English (1. c4)',
-    movesUci: ['c2c4', 'e7e5', 'b1c3', 'g8f6'],
-  },
+  ...OPENING_LINES.map((o) => ({
+    id: o.id,
+    name: o.name,
+    movesUci: o.movesUci,
+  })),
 ]
 
 export function getWhiteOpeningPreset(id: string): WhiteOpeningPreset {

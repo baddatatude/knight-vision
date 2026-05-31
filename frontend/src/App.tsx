@@ -40,6 +40,17 @@ import {
   stepEventLabels,
   type MoveEventLabel,
 } from './studyHighlights'
+import { OPENING_LINES, getOpeningLine } from './openingLines'
+import {
+  countUserMovesInLine,
+  countUserMovesPlayed,
+  nextUserMoveIndex,
+  openingQuizStartMoves,
+  opponentMovesAfter,
+  uciMovesMatch,
+  type OpeningQuizColor,
+} from './openingQuiz'
+import { buildOpeningPlanSteps } from './openingWalkthrough'
 import {
   enginePieceColor,
   getPresetWhiteMove,
@@ -48,11 +59,23 @@ import {
   WHITE_OPENING_PRESETS,
   type VsEngineMode,
 } from './openingPresets'
+import {
+  BoardMenu,
+  BoardMenuSubsection,
+  CollapsibleSubsection,
+  type BoardMenuSectionId,
+} from './BoardMenu'
 import './App.css'
 
 /** Coordinates always white; dark halo for contrast on light squares and rings. */
-const BOARD_NOTATION_OPTIONS = {
+const BOARD_CHESS_OPTIONS = {
   showNotation: true as const,
+  lightSquareStyle: {
+    backgroundColor: 'rgba(255, 252, 245, 0.78)',
+  },
+  darkSquareStyle: {
+    backgroundColor: 'rgba(128, 98, 74, 0.89)',
+  },
   darkSquareNotationStyle: {
     color: '#ffffff',
     zIndex: 30,
@@ -159,6 +182,53 @@ function deriveCaptures(moves: StoredMove[]) {
   blackLost.sort((a, b) => captureSortKey(b) - captureSortKey(a))
   whiteLost.sort((a, b) => captureSortKey(b) - captureSortKey(a))
   return { blackLost, whiteLost, whitePts, blackPts }
+}
+
+type CaptureState = ReturnType<typeof deriveCaptures>
+
+function CaptureZoneBar({
+  side,
+  state,
+}: {
+  side: 'black' | 'white'
+  state: CaptureState
+}) {
+  const isBlackBar = side === 'black'
+  const lost = isBlackBar ? state.blackLost : state.whiteLost
+  const glyphs = isBlackBar ? GLYPH_BLACK : GLYPH_WHITE
+  const title = isBlackBar ? 'Black lost' : 'White lost'
+  const ariaLabel = isBlackBar
+    ? 'Pieces White captured from Black'
+    : 'Pieces Black captured from White'
+
+  return (
+    <div className={`capture-zone capture-zone--${side}`}>
+      <div className="capture-zone-header">
+        <span className="capture-zone-title">{title}</span>
+        <span className="material-score" aria-live="polite">
+          <span className="material-score-label">Material taken</span>
+          <span className="material-score-nums">
+            {state.whitePts} – {state.blackPts}
+          </span>
+        </span>
+      </div>
+      <div className="capture-pieces" aria-label={ariaLabel}>
+        {lost.length === 0 ? (
+          <span className="capture-empty">—</span>
+        ) : (
+          lost.map((t, i) => (
+            <span
+              key={`${side}-${i}-${t}`}
+              className={`capture-glyph capture-glyph--${side}`}
+              title={`${isBlackBar ? 'Black' : 'White'} ${t}`}
+            >
+              {glyphs[t] ?? t}
+            </span>
+          ))
+        )}
+      </div>
+    </div>
+  )
 }
 
 function playThrough(moves: StoredMove[], count: number): Chess {
@@ -413,7 +483,51 @@ export default function App() {
   const [studyLoading, setStudyLoading] = useState(false)
   const [studyError, setStudyError] = useState<string | null>(null)
   const [studyTitle, setStudyTitle] = useState<string | null>(null)
-  const [overlaysMinimized, setOverlaysMinimized] = useState(false)
+  const [openingLineId, setOpeningLineId] = useState(OPENING_LINES[0].id)
+  const [openingTitle, setOpeningTitle] = useState<string | null>(null)
+  const [openingQuizActive, setOpeningQuizActive] = useState(false)
+  const [openingQuizPlayColor, setOpeningQuizPlayColor] =
+    useState<OpeningQuizColor>('w')
+  const [openingQuizError, setOpeningQuizError] = useState<string | null>(null)
+  const [openingQuizComplete, setOpeningQuizComplete] = useState(false)
+  const [openingQuizWrongAt, setOpeningQuizWrongAt] = useState<{
+    from: Square
+    to: Square
+  } | null>(null)
+  const [boardMenuOpen, setBoardMenuOpen] = useState<
+    Record<BoardMenuSectionId, boolean>
+  >({
+    overlays: false,
+    learn: false,
+    bot: false,
+  })
+  const [learnSubOpen, setLearnSubOpen] = useState({
+    study: false,
+    openings: false,
+  })
+  const openBoardMenuSection = (id: BoardMenuSectionId) => {
+    setBoardMenuOpen({
+      overlays: false,
+      learn: false,
+      bot: false,
+      [id]: true,
+    })
+  }
+
+  const toggleBoardMenu = (id: BoardMenuSectionId) => {
+    setBoardMenuOpen((prev) => {
+      if (prev[id]) {
+        return { overlays: false, learn: false, bot: false }
+      }
+      return {
+        overlays: false,
+        learn: false,
+        bot: false,
+        [id]: true,
+      }
+    })
+  }
+  const [studyMinimized, setStudyMinimized] = useState(false)
   const [studyNavMode, setStudyNavMode] = useState<'all' | 'highlights'>('all')
 
   const fen = useMemo(() => {
@@ -448,6 +562,7 @@ export default function App() {
   const [showSquareColors, setShowSquareColors] = useState(true)
   const [showAttacks, setShowAttacks] = useState(true)
   const [showUndefended, setShowUndefended] = useState(true)
+  const [showCapturedPieces, setShowCapturedPieces] = useState(true)
   const [boardOrientation, setBoardOrientation] = useState<'white' | 'black'>(
     'white',
   )
@@ -469,7 +584,10 @@ export default function App() {
   const [vsEngineMode, setVsEngineMode] = useState<VsEngineMode>('engine_black')
   const [whiteOpeningPresetId, setWhiteOpeningPresetId] = useState('london')
   const userColor = userPieceColor(vsEngineMode)
-  const engineColor = enginePieceColor(vsEngineMode)
+  const inputUserColor: 'w' | 'b' | null = openingQuizActive
+    ? openingQuizPlayColor
+    : userColor
+  const engineColor = openingQuizActive ? null : enginePieceColor(vsEngineMode)
   const [engineMoveLoading, setEngineMoveLoading] = useState(false)
   const [enginePlayError, setEnginePlayError] = useState<string | null>(null)
   const enginePlayRequestRef = useRef(0)
@@ -532,7 +650,7 @@ export default function App() {
   }, [])
 
   useEffect(() => {
-    if (planViewActive) {
+    if (planViewActive || openingQuizActive) {
       setEngineMoveLoading(false)
       return
     }
@@ -636,6 +754,7 @@ export default function App() {
     engineDepth,
     planViewActive,
     whiteOpeningPresetId,
+    openingQuizActive,
   ])
 
   useEffect(() => {
@@ -645,7 +764,7 @@ export default function App() {
   }, [moves.length])
 
   useEffect(() => {
-    if (planViewActive) return
+    if (vsEngineMode === 'off' || planViewActive || openingQuizActive) return
     if (cursor !== moves.length || moves.length === 0) return
 
     const movesBy = moves.map((m) => m.by)
@@ -692,7 +811,15 @@ export default function App() {
     return () => {
       cancelled = true
     }
-  }, [moves, cursor, userColor, planViewActive, accuracyScores])
+  }, [
+    moves,
+    cursor,
+    userColor,
+    vsEngineMode,
+    planViewActive,
+    openingQuizActive,
+    accuracyScores,
+  ])
 
   const accuracySummary = useMemo(
     () =>
@@ -705,7 +832,13 @@ export default function App() {
   )
 
   const accuracyPendingIdx = useMemo(() => {
-    if (planViewActive || cursor !== moves.length || moves.length === 0) {
+    if (
+      vsEngineMode === 'off' ||
+      planViewActive ||
+      openingQuizActive ||
+      cursor !== moves.length ||
+      moves.length === 0
+    ) {
       return -1
     }
     return findLatestUnscoredUserMoveIndex(
@@ -713,7 +846,7 @@ export default function App() {
       accuracyScores,
       userColor,
     )
-  }, [planViewActive, cursor, moves, accuracyScores, userColor])
+  }, [vsEngineMode, planViewActive, openingQuizActive, cursor, moves, accuracyScores, userColor])
 
   const gameForInput = useMemo(
     () => playThrough(moves, cursor),
@@ -739,6 +872,7 @@ export default function App() {
     setSelectedSquare(null)
     setContactPopupSquare(null)
     setThreatViewSquare(null)
+    setOpeningQuizWrongAt(null)
     if (singleClickTimerRef.current) {
       clearTimeout(singleClickTimerRef.current)
       singleClickTimerRef.current = null
@@ -756,24 +890,80 @@ export default function App() {
     return squareAnchorPercent(contactPopupSquare, boardOrientation)
   }, [contactPopupSquare, boardOrientation])
 
-  const commitMove = useCallback((from: Square, to: Square) => {
-    const s = lineRef.current
-    const g = playThrough(s.moves, s.cursor)
-    const sm = tryMove(g, from, to)
-    if (!sm) return false
-    setLine({
-      moves: [...s.moves.slice(0, s.cursor), sm],
-      cursor: s.cursor + 1,
-    })
-    setEnginePlayError(null)
-    setSelectedSquare(null)
-    setContactPopupSquare(null)
-    setThreatViewSquare(null)
-    return true
-  }, [])
+  const commitMove = useCallback(
+    (from: Square, to: Square) => {
+      const s = lineRef.current
+      const g = playThrough(s.moves, s.cursor)
+
+      if (openingQuizActive) {
+        if (openingQuizComplete) return false
+        if (g.turn() !== openingQuizPlayColor) return false
+
+        const line = getOpeningLine(openingLineId)
+        const expectedIdx = nextUserMoveIndex(
+          s.moves,
+          line.movesUci,
+          openingQuizPlayColor,
+        )
+        if (expectedIdx === null) return false
+
+        const sm = tryMove(g, from, to)
+        if (!sm) return false
+
+        if (!uciMovesMatch(storedMoveToUci(sm), line.movesUci[expectedIdx])) {
+          setOpeningQuizError('Not in the opening line — try again.')
+          setOpeningQuizWrongAt({ from, to })
+          return false
+        }
+
+        setOpeningQuizError(null)
+        setOpeningQuizWrongAt(null)
+        let newMoves = [...s.moves.slice(0, s.cursor), sm]
+        const auto = opponentMovesAfter(
+          newMoves,
+          line.movesUci,
+          openingQuizPlayColor,
+          expectedIdx,
+        )
+        newMoves = [...newMoves, ...auto]
+        setLine({ moves: newMoves, cursor: newMoves.length })
+
+        const stillGoing =
+          nextUserMoveIndex(newMoves, line.movesUci, openingQuizPlayColor) !==
+          null
+        if (!stillGoing) setOpeningQuizComplete(true)
+
+        setSelectedSquare(null)
+        setContactPopupSquare(null)
+        setThreatViewSquare(null)
+        return true
+      }
+
+      const sm = tryMove(g, from, to)
+      if (!sm) return false
+      setLine({
+        moves: [...s.moves.slice(0, s.cursor), sm],
+        cursor: s.cursor + 1,
+      })
+      setEnginePlayError(null)
+      setSelectedSquare(null)
+      setContactPopupSquare(null)
+      setThreatViewSquare(null)
+      return true
+    },
+    [openingQuizActive, openingQuizComplete, openingQuizPlayColor, openingLineId],
+  )
 
   const handleMoveClick = useCallback(
     (sq: Square, g: Chess) => {
+      const line = lineRef.current
+      if (
+        openingQuizActive &&
+        line.cursor !== line.moves.length
+      ) {
+        return
+      }
+
       if (selectedSquare) {
         if (sq === selectedSquare) {
           setSelectedSquare(null)
@@ -784,7 +974,7 @@ export default function App() {
           commitMove(selectedSquare, sq)
           return
         }
-        if (canUserSelectSquare(g, sq, userColor)) {
+        if (canUserSelectSquare(g, sq, inputUserColor)) {
           setSelectedSquare(sq)
           return
         }
@@ -792,16 +982,22 @@ export default function App() {
         return
       }
 
-      if (canUserSelectSquare(g, sq, userColor)) {
+      if (canUserSelectSquare(g, sq, inputUserColor)) {
         setSelectedSquare(sq)
       }
     },
-    [selectedSquare, userColor, commitMove],
+    [selectedSquare, inputUserColor, commitMove, openingQuizActive],
   )
 
   const onSquareClick = useCallback(
     ({ square }: SquareHandlerArgs) => {
-      if (planViewActive || engineMoveLoading) return
+      if (
+        planViewActive ||
+        engineMoveLoading ||
+        (openingQuizActive && openingQuizComplete)
+      ) {
+        return
+      }
       const sq = square as Square
       const now = Date.now()
       const last = clickTimingRef.current
@@ -864,6 +1060,8 @@ export default function App() {
       threatViewSquare,
       selectedSquare,
       handleMoveClick,
+      openingQuizActive,
+      openingQuizComplete,
     ],
   )
 
@@ -913,9 +1111,18 @@ export default function App() {
           threatTargetSet.has(square) &&
           square !== threatViewSquare
         const threatCapture = showThreat && Boolean(piece)
+        const showQuizWrong =
+          openingQuizActive &&
+          openingQuizWrongAt?.to === square &&
+          cursor === moves.length
         return (
           <div style={style}>
             {children}
+            {showQuizWrong ? (
+              <span className="quiz-wrong-mark" aria-hidden>
+                ✕
+              </span>
+            ) : null}
             {showLegal ? (
               <span
                 className={
@@ -937,7 +1144,9 @@ export default function App() {
               />
             ) : null}
             {showDot ? (
-              <span className="undefended-piece-dot" aria-hidden />
+              <span className="undefended-piece-star" aria-hidden>
+                ★
+              </span>
             ) : null}
           </div>
         )
@@ -952,17 +1161,109 @@ export default function App() {
       legalTargetSet,
       threatViewSquare,
       threatTargetSet,
+      openingQuizActive,
+      openingQuizWrongAt,
+      cursor,
+      moves.length,
     ],
   )
+
+  const applyLearnModeAppearance = () => {
+    setShowSquareColors(false)
+    setShowAttacks(false)
+    setShowUndefended(false)
+    setShowCapturedPieces(false)
+  }
 
   const exitPlanView = () => {
     setPlanViewActive(false)
     setPlanStep(0)
     setStudyTitle(null)
+    setOpeningTitle(null)
     setStudyNavMode('all')
+    setStudyMinimized(false)
   }
 
+  const endOpeningQuiz = () => {
+    setOpeningQuizActive(false)
+    setOpeningQuizComplete(false)
+    setOpeningQuizError(null)
+    setOpeningQuizWrongAt(null)
+  }
+
+  const startOpeningQuiz = () => {
+    applyLearnModeAppearance()
+    const line = getOpeningLine(openingLineId)
+    const auto = openingQuizStartMoves(line.movesUci, openingQuizPlayColor)
+    exitPlanView()
+    setVsEngineMode('off')
+    setPlanData(null)
+    setPlanViewActive(false)
+    setLine({ moves: auto, cursor: auto.length })
+    setOpeningQuizActive(true)
+    setOpeningQuizComplete(false)
+    setOpeningQuizError(null)
+    setEnginePlayError(null)
+    setBoardOrientation(openingQuizPlayColor === 'w' ? 'white' : 'black')
+    setAccuracyScores([])
+    setAccuracyError(null)
+    openBoardMenuSection('learn')
+    setLearnSubOpen({ study: false, openings: true })
+  }
+
+  const startOpeningWalkthrough = () => {
+    applyLearnModeAppearance()
+    endOpeningQuiz()
+    const line = getOpeningLine(openingLineId)
+    const { start_fen, steps } = buildOpeningPlanSteps(line.movesUci)
+    if (!steps.length) return
+
+    setPlanData({
+      start_fen,
+      bestmove_uci: null,
+      pv_uci: line.movesUci,
+      cp_white: null,
+      mate_white: null,
+      steps,
+      narrative: null,
+      intro: line.description,
+      summary: `Line complete — ${line.name}${line.eco ? ` (${line.eco})` : ''}.`,
+      explain_error: null,
+      explain_code: null,
+    })
+    setOpeningTitle(line.name)
+    setStudyTitle(null)
+    setStudyNavMode('all')
+    setPlanStep(0)
+    setPlanViewActive(true)
+    setVsEngineMode('off')
+    setLine({ moves: [], cursor: 0 })
+    setEnginePlayError(null)
+    setStudyError(null)
+    openBoardMenuSection('learn')
+    setLearnSubOpen({ study: false, openings: true })
+  }
+
+  const openingQuizProgress = useMemo(() => {
+    if (!openingQuizActive) return null
+    const line = getOpeningLine(openingLineId)
+    const total = countUserMovesInLine(line.movesUci, openingQuizPlayColor)
+    const done = countUserMovesPlayed(
+      moves,
+      line.movesUci,
+      openingQuizPlayColor,
+    )
+    return { line, done, total }
+  }, [
+    openingQuizActive,
+    openingLineId,
+    openingQuizPlayColor,
+    moves,
+  ])
+
   const startStudy = async () => {
+    endOpeningQuiz()
+    applyLearnModeAppearance()
     setStudyLoading(true)
     setStudyError(null)
     try {
@@ -987,6 +1288,8 @@ export default function App() {
       setVsEngineMode('off')
       setLine({ moves: [], cursor: 0 })
       setEnginePlayError(null)
+      openBoardMenuSection('learn')
+      setLearnSubOpen({ study: true, openings: false })
     } catch (e: unknown) {
       setStudyError(
         e instanceof ApiClientError
@@ -1046,7 +1349,14 @@ export default function App() {
       planData ? Math.min(planData.steps.length, s + 1) : s,
     )
 
+  const openingActive = planViewActive && !!openingTitle
   const studyActive = planViewActive && !!studyTitle
+  const walkthroughActive = openingActive || studyActive
+  const playingBot =
+    vsEngineMode !== 'off' &&
+    !planViewActive &&
+    !walkthroughActive &&
+    !openingQuizActive
 
   const studyHighlightSteps = useMemo(() => {
     if (!planData || !studyActive) return [0]
@@ -1114,6 +1424,8 @@ export default function App() {
     setPlanStep(0)
     setPlanError(null)
     setStudyTitle(null)
+    setOpeningTitle(null)
+    endOpeningQuiz()
     setAccuracyScores([])
     setAccuracyError(null)
     scoringRequestRef.current = 0
@@ -1139,12 +1451,16 @@ export default function App() {
     }
   }
 
-  const browsing = !planViewActive && cursor < moves.length
+  const browsing =
+    !planViewActive && cursor < moves.length
+  const quizBrowsing = openingQuizActive && browsing
   const planStatus =
     planViewActive && planData
-      ? studyTitle
-        ? `Study: ${studyTitle} — step ${planStep} / ${planData.steps.length}`
-        : `Engine plan: step ${planStep} / ${planData.steps.length} (from this position)`
+      ? openingTitle
+        ? `Opening: ${openingTitle} — step ${planStep} / ${planData.steps.length}`
+        : studyTitle
+          ? `Study: ${studyTitle} — step ${planStep} / ${planData.steps.length}`
+          : `Engine plan: step ${planStep} / ${planData.steps.length} (from this position)`
       : null
 
   const planStepExplanation = useMemo(() => {
@@ -1175,19 +1491,25 @@ export default function App() {
           analysis.is_checkmate ? ' — checkmate' : ''
         }${analysis.is_stalemate ? ' — stalemate' : ''}${
           browsing ? ` — replay (${cursor}/${moves.length} plies)` : ''
-        }${planStatus ? ` — ${planStatus}` : ''}`
+        }${planStatus ? ` — ${planStatus}` : ''}${
+          quizBrowsing ? ' — reviewing quiz line' : ''
+        }`
       : analyzeError
         ? 'Position analysis unavailable'
         : 'Loading position…'
 
   const playStatus =
-    vsEngineMode !== 'off' && engineMoveLoading
-      ? engineColor === 'b'
-        ? 'Stockfish is thinking (Black)…'
-        : 'White is playing…'
-      : enginePlayError
-        ? `Engine: ${enginePlayError}`
-        : null
+    openingQuizActive && openingQuizProgress
+      ? openingQuizComplete
+        ? `Opening quiz complete — ${openingQuizProgress.line.name}`
+        : `Opening quiz — your move ${openingQuizProgress.done + 1} of ${openingQuizProgress.total}`
+      : vsEngineMode !== 'off' && engineMoveLoading
+        ? engineColor === 'b'
+          ? 'Stockfish is thinking (Black)…'
+          : 'White is playing…'
+        : enginePlayError
+          ? `Engine: ${enginePlayError}`
+          : null
 
   const planToolbar = planData ? (
     <div className="board-toolbar plan-toolbar">
@@ -1227,9 +1549,12 @@ export default function App() {
         )
     : []
 
+  const showWalkthroughStart =
+    !studyActive || studyNavMode === 'all'
+
   const planStepList = planData ? (
     <ul className="plan-step-list">
-      {!(studyActive && studyNavMode === 'highlights') ? (
+      {showWalkthroughStart ? (
         <li>
           <button
             type="button"
@@ -1263,7 +1588,7 @@ export default function App() {
   ) : null
 
   const studyJumpRow =
-    studyActive && planData ? (
+    studyActive && planData && studyNavMode === 'highlights' ? (
       <div className="study-jump-row" aria-label="Jump to key moments">
         {studyHighlightSteps
           .filter((idx) => idx > 0)
@@ -1300,61 +1625,558 @@ export default function App() {
     </div>
   ) : null
 
-  const overlaysPanel = (
+  const studyPanel = walkthroughActive && planData ? (
     <div
-      className={`overlays-panel${overlaysMinimized ? ' overlays-panel--minimized' : ''}`}
+      className={`study-panel${studyMinimized ? ' study-panel--minimized' : ''}`}
+      aria-label="Study annotations"
     >
-      <div className="overlays-panel-header">
-        <h2>Overlays</h2>
+      <div className="study-panel-header">
+        <h2 className="study-panel-heading">
+          {openingTitle
+            ? `Opening: ${openingTitle}`
+            : studyTitle
+              ? `Studying: ${studyTitle}`
+              : 'Walkthrough'}
+        </h2>
         <button
           type="button"
-          className="overlays-toggle"
-          aria-expanded={!overlaysMinimized}
-          onClick={() => setOverlaysMinimized((m) => !m)}
+          className="panel-toggle"
+          aria-expanded={!studyMinimized}
+          onClick={() => setStudyMinimized((m) => !m)}
         >
-          {overlaysMinimized ? 'Show' : 'Minimize'}
+          {studyMinimized ? 'Show' : 'Minimize'}
         </button>
       </div>
-      {!overlaysMinimized ? (
-        <>
-          <label className="check check--master">
-            <input
-              type="checkbox"
-              checked={showSquareColors}
-              onChange={(e) => setShowSquareColors(e.target.checked)}
-            />
-            Square colors (attack rings, undefended dots, last-move highlight)
-          </label>
-          <div
-            className={`overlay-subtoggles${showSquareColors ? '' : ' overlay-subtoggles--off'}`}
-          >
-            <label className="check">
-              <input
-                type="checkbox"
-                checked={showAttacks}
-                disabled={!showSquareColors}
-                onChange={(e) => setShowAttacks(e.target.checked)}
-              />
-              Attack rings per square (who attacks that square: blue = White,
-              red = Black, purple = both, green = neither)
-            </label>
-            <label className="check">
-              <input
-                type="checkbox"
-                checked={showUndefended}
-                disabled={!showSquareColors}
-                onChange={(e) => setShowUndefended(e.target.checked)}
-              />
-              Undefended pieces (red dot on the piece)
-            </label>
-          </div>
-          <p className="hint overlays-hint">
-            A friendly piece is undefended when no friendly piece attacks its
-            square (python-chess <code>board.attackers(color, square)</code>).
+      {!studyMinimized ? (
+        <div className="study-panel-body">
+          <p className="study-status" aria-live="polite">
+            {statusLine}
           </p>
-        </>
+          {studyActive ? (
+            <div className="study-nav-modes" role="tablist" aria-label="Navigation mode">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={studyNavMode === 'all'}
+                className={
+                  studyNavMode === 'all' ? 'study-nav-mode--active' : ''
+                }
+                onClick={() => setStudyNavMode('all')}
+              >
+                Every move
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={studyNavMode === 'highlights'}
+                className={
+                  studyNavMode === 'highlights'
+                    ? 'study-nav-mode--active'
+                    : ''
+                }
+                onClick={() => setStudyNavMode('highlights')}
+              >
+                Key moments
+              </button>
+            </div>
+          ) : null}
+          {studyActive ? studyJumpRow : null}
+          <div className="study-annotation-area">
+            {planExplanation ?? (
+              <p className="hint study-no-note">No note for this step.</p>
+            )}
+          </div>
+          {planStepList}
+        </div>
       ) : null}
     </div>
+  ) : null
+
+  const overlaysMenuContent = (
+    <>
+      <label className="check check--master">
+        <input
+          type="checkbox"
+          checked={showSquareColors}
+          onChange={(e) => setShowSquareColors(e.target.checked)}
+        />
+        Square colors (attack rings, undefended stars, last-move highlight)
+      </label>
+      <div
+        className={`overlay-subtoggles${showSquareColors ? '' : ' overlay-subtoggles--off'}`}
+      >
+        <label className="check">
+          <input
+            type="checkbox"
+            checked={showAttacks}
+            disabled={!showSquareColors}
+            onChange={(e) => setShowAttacks(e.target.checked)}
+          />
+          Attack rings per square (blue = White, red = Black, purple = both,
+          green = neither)
+        </label>
+        <label className="check">
+          <input
+            type="checkbox"
+            checked={showUndefended}
+            disabled={!showSquareColors}
+            onChange={(e) => setShowUndefended(e.target.checked)}
+          />
+          Undefended pieces (pink star on the piece)
+        </label>
+      </div>
+      <label className="check check--master">
+        <input
+          type="checkbox"
+          checked={showCapturedPieces}
+          onChange={(e) => setShowCapturedPieces(e.target.checked)}
+        />
+        Captured pieces (lost material above and below the board)
+      </label>
+      <p className="hint overlays-hint">
+        A friendly piece is undefended when no friendly piece attacks its square.
+      </p>
+    </>
+  )
+
+  const learnMenuContent = (
+    <>
+      <CollapsibleSubsection
+        title="Study famous games"
+        open={learnSubOpen.study}
+        onToggle={() =>
+          setLearnSubOpen((prev) => ({ ...prev, study: !prev.study }))
+        }
+      >
+        <p className="hint">
+          Step through a classic game with visual-awareness notes on the board.
+        </p>
+        <div className="field">
+          <label htmlFor="study-game">Game</label>
+          <select
+            id="study-game"
+            value={studyGameId}
+            disabled={studyLoading || planViewActive}
+            onChange={(e) => setStudyGameId(e.target.value)}
+          >
+            {studyCatalog.map((g) => (
+              <option key={g.id} value={g.id}>
+                {g.name} ({g.year})
+              </option>
+            ))}
+          </select>
+        </div>
+        <button
+          type="button"
+          className="primary"
+          onClick={startStudy}
+          disabled={
+            studyLoading ||
+            planViewActive ||
+            openingQuizActive ||
+            studyCatalog.length === 0
+          }
+        >
+          {studyLoading ? 'Loading lesson…' : 'Start game walkthrough'}
+        </button>
+        {studyError ? <p className="error">{studyError}</p> : null}
+      </CollapsibleSubsection>
+
+      <CollapsibleSubsection
+        title="Openings"
+        open={learnSubOpen.openings}
+        onToggle={() =>
+          setLearnSubOpen((prev) => ({ ...prev, openings: !prev.openings }))
+        }
+      >
+        <p className="hint">
+          Choose a mainline, then watch both sides or quiz yourself on your
+          moves.
+        </p>
+        <div className="field">
+          <label htmlFor="opening-line">Opening</label>
+          <select
+            id="opening-line"
+            value={openingLineId}
+            disabled={planViewActive || openingQuizActive}
+            onChange={(e) => setOpeningLineId(e.target.value)}
+          >
+            {OPENING_LINES.map((o) => (
+              <option key={o.id} value={o.id}>
+                {o.name}
+                {o.eco ? ` (${o.eco})` : ''}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="board-menu-actions">
+          <button
+            type="button"
+            className="primary"
+            onClick={startOpeningWalkthrough}
+            disabled={planViewActive || openingQuizActive}
+          >
+            Watch opening
+          </button>
+          <div className="field board-menu-quiz-side">
+            <label htmlFor="opening-quiz-color">Quiz: you play</label>
+            <select
+              id="opening-quiz-color"
+              value={openingQuizPlayColor}
+              disabled={planViewActive || openingQuizActive}
+              onChange={(e) =>
+                setOpeningQuizPlayColor(e.target.value as OpeningQuizColor)
+              }
+            >
+              <option value="w">White</option>
+              <option value="b">Black</option>
+            </select>
+          </div>
+          {!openingQuizActive ? (
+            <button
+              type="button"
+              className="primary"
+              onClick={startOpeningQuiz}
+              disabled={planViewActive}
+            >
+              Take quiz
+            </button>
+          ) : (
+            <button type="button" onClick={endOpeningQuiz}>
+              End quiz
+            </button>
+          )}
+        </div>
+        {openingQuizError && !openingQuizActive ? (
+          <p className="error">{openingQuizError}</p>
+        ) : null}
+      </CollapsibleSubsection>
+    </>
+  )
+
+  const gameBoardToolbar = (
+    <div className="board-toolbar board-toolbar--in-menu">
+      <button
+        type="button"
+        className="icon-btn"
+        aria-label="Previous position"
+        title="Step back through game moves"
+        disabled={cursor === 0}
+        onClick={historyBack}
+      >
+        ←
+      </button>
+      <button
+        type="button"
+        className="icon-btn"
+        aria-label="Next position"
+        title="Step forward through game moves"
+        disabled={cursor === moves.length}
+        onClick={historyForward}
+      >
+        →
+      </button>
+      <button
+        type="button"
+        onClick={undo}
+        title="Take back your last move and the engine reply (two plies)"
+        disabled={cursor !== moves.length || moves.length === 0}
+      >
+        Undo
+      </button>
+      <button type="button" onClick={reset}>
+        New game
+      </button>
+      <button
+        type="button"
+        onClick={() =>
+          setBoardOrientation((o) => (o === 'white' ? 'black' : 'white'))
+        }
+      >
+        Flip board
+      </button>
+    </div>
+  )
+
+  const quizBoardToolbar = (
+    <div className="board-toolbar">
+      <button
+        type="button"
+        className="icon-btn"
+        aria-label="Previous position"
+        title="Step back through game moves"
+        disabled={cursor === 0}
+        onClick={historyBack}
+      >
+        ←
+      </button>
+      <button
+        type="button"
+        className="icon-btn"
+        aria-label="Next position"
+        title="Step forward in the quiz line"
+        disabled={cursor === moves.length}
+        onClick={historyForward}
+      >
+        →
+      </button>
+      <button
+        type="button"
+        onClick={undo}
+        title="Remove the last move from the line"
+        disabled={
+          cursor !== moves.length || moves.length === 0
+        }
+      >
+        Undo
+      </button>
+      <button type="button" onClick={reset}>
+        New game
+      </button>
+      <button
+        type="button"
+        onClick={() =>
+          setBoardOrientation((o) => (o === 'white' ? 'black' : 'white'))
+        }
+      >
+        Flip board
+      </button>
+    </div>
+  )
+
+  const accuracyPanel = playingBot ? (
+    <div className="accuracy-in-menu" aria-live="polite">
+      <h3 className="accuracy-in-menu-title">Your accuracy</h3>
+      <p className="accuracy-panel">
+        {accuracyError ? (
+          <>Accuracy unavailable for the last move.</>
+        ) : accuracyLoading || accuracyPendingIdx >= 0 ? (
+          <>Scoring your move (depth {ACCURACY_DEPTH})…</>
+        ) : accuracySummary.accuracyPercent != null ? (
+          <>
+            <strong>{accuracySummary.accuracyPercent}%</strong>
+            {' · '}
+            {accuracySummary.scored.length} move
+            {accuracySummary.scored.length === 1 ? '' : 's'}
+            {accuracySummary.avgCpLoss != null
+              ? ` · avg ${accuracySummary.avgCpLoss} cp loss`
+              : ''}
+          </>
+        ) : (
+          <>Play a move to start accuracy tracking.</>
+        )}
+      </p>
+      {accuracySummary.last ? (
+        <p className="hint accuracy-last">
+          Last move:{' '}
+          <strong>
+            {classificationLabel(accuracySummary.last.classification)}
+          </strong>
+          {accuracySummary.last.cp_loss > 0
+            ? ` (+${accuracySummary.last.cp_loss} cp vs best)`
+            : accuracySummary.last.played_uci === accuracySummary.last.best_uci
+              ? ' (engine best)'
+              : ''
+          }
+        </p>
+      ) : null}
+      {accuracyError ? <p className="error">{accuracyError}</p> : null}
+    </div>
+  ) : null
+
+  const playBotMenuContent = (
+    <>
+      <BoardMenuSubsection title="Play vs bot">
+        <div className="field">
+          <label htmlFor="vs-engine-mode">You play</label>
+          <select
+            id="vs-engine-mode"
+            value={vsEngineMode}
+            disabled={openingQuizActive}
+            onChange={(e) => {
+              const mode = e.target.value as VsEngineMode
+              setVsEngineMode(mode)
+              setEnginePlayError(null)
+              if (mode !== 'off') {
+                openBoardMenuSection('bot')
+              }
+              setBoardOrientation(mode === 'engine_white' ? 'black' : 'white')
+            }}
+          >
+            <option value="engine_black">White (bot plays Black)</option>
+            <option value="engine_white">Black (bot plays White)</option>
+            <option value="off">Both sides (no bot)</option>
+          </select>
+        </div>
+        {vsEngineMode === 'engine_white' ? (
+          <div className="field">
+            <label htmlFor="white-opening">White opening (bot)</label>
+            <select
+              id="white-opening"
+              value={whiteOpeningPresetId}
+              disabled={moves.length > 0}
+              onChange={(e) => setWhiteOpeningPresetId(e.target.value)}
+            >
+              {WHITE_OPENING_PRESETS.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+            <p className="hint">
+              Choose before move 1. Bot follows this book line while it matches,
+              then Stockfish.
+            </p>
+          </div>
+        ) : null}
+        {playingBot ? (
+          <div className="bot-play-panel">
+            {gameBoardToolbar}
+            <p className="status bot-play-status">{statusLine}</p>
+            <div className="opening-lines">
+              <p className="status opening-line">
+                <strong>White</strong>{' '}
+                {whiteOpeningLabel ?? (
+                  <span className="opening-pending">—</span>
+                )}
+              </p>
+              <p className="status opening-line">
+                <strong>Black</strong>{' '}
+                {blackOpeningLabel ?? (
+                  <span className="opening-pending">—</span>
+                )}
+              </p>
+              {lineOpeningLabel &&
+              lineOpeningLabel !== whiteOpeningLabel &&
+              lineOpeningLabel !== blackOpeningLabel ? (
+                <p className="status opening-line opening-line--full">
+                  <strong>Line</strong> {lineOpeningLabel}
+                </p>
+              ) : null}
+            </div>
+            <p className="hint board-hint">
+              Single-click any piece for orange threat/defense circles; then click
+              a green square to move yours. Double-click for defender/attacker
+              list. Use ← → to replay or branch.
+            </p>
+            {playStatus ? (
+              <p className="status play-status">{playStatus}</p>
+            ) : null}
+            {accuracyPanel}
+          </div>
+        ) : vsEngineMode !== 'off' ? (
+          <p className="hint">Exit lesson or quiz mode to play the bot.</p>
+        ) : (
+          <p className="hint">
+            Choose White or Black above to play Stockfish. Your moves are scored
+            at depth {ACCURACY_DEPTH}.
+          </p>
+        )}
+      </BoardMenuSubsection>
+
+      <BoardMenuSubsection title="Engine tools">
+        <p className="hint">
+          Evaluate the current position or walk through Stockfish&apos;s main line
+          from here.
+        </p>
+        <p className="engine-meta">
+          Engine:{' '}
+          {engineOk === null
+            ? 'checking…'
+            : engineOk
+              ? `ok (${enginePath})`
+              : `unavailable (${enginePath})`}
+        </p>
+        <div className="field">
+          <label htmlFor="engine-depth">Engine depth</label>
+          <input
+            id="engine-depth"
+            type="number"
+            min={1}
+            max={40}
+            value={engineDepth}
+            onChange={(e) =>
+              setEngineDepth(Number(e.target.value) || ENGINE_DEPTH_DEFAULT)
+            }
+          />
+        </div>
+        <p className="hint">
+          Bot replies and analysis below use this depth. Accuracy scoring uses
+          depth {ACCURACY_DEPTH}.
+        </p>
+        <button
+          type="button"
+          className="primary"
+          onClick={runEval}
+          disabled={evalLoading || planLoading || engineMoveLoading}
+        >
+          {evalLoading ? 'Stockfish is thinking…' : 'Evaluate position'}
+        </button>
+        <button
+          type="button"
+          className="primary secondary"
+          onClick={runPlan}
+          disabled={planLoading || evalLoading || engineMoveLoading}
+          title="Stockfish main line; step through on the board. English story needs server OpenAI key."
+        >
+          {planLoading
+            ? openaiConfigured
+              ? 'Stockfish + AI explanation…'
+              : 'Stockfish is building the line…'
+            : 'Explain & walk plan'}
+        </button>
+        {openaiConfigured === false ? (
+          <p className="hint">
+            AI explanations need <code>OPENAI_API_KEY</code> on the server
+            (repo-root <code>.env</code>). Walk-through without text still works.
+          </p>
+        ) : null}
+        {planError ? <p className="error">{planError}</p> : null}
+        {evalError ? <p className="error">{evalError}</p> : null}
+        {planData?.narrative ? (
+          <div className="plan-narrative">
+            <h3>Full engine story</h3>
+            <p className="hint">
+              Step through the board to read one move at a time in the line list.
+            </p>
+            <div className="plan-narrative-body">{planData.narrative}</div>
+            {planData.summary ? (
+              <p className="plan-summary">
+                <strong>Bottom line:</strong> {planData.summary}
+              </p>
+            ) : null}
+            {planData.explain_error ? (
+              <p className="error">{planData.explain_error}</p>
+            ) : null}
+          </div>
+        ) : null}
+        {evalResult ? (
+          <div className="eval-out">
+            <div>
+              <strong>Eval</strong> {formatEval(evalResult)}
+            </div>
+            <div>
+              <strong>Best</strong> {evalResult.bestmove_uci ?? '—'}
+            </div>
+            {evalResult.pv_uci.length ? (
+              <div className="pv">
+                <strong>PV</strong> {evalResult.pv_uci.slice(0, 8).join(' ')}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+      </BoardMenuSubsection>
+    </>
+  )
+
+  const boardMenu = (
+    <BoardMenu
+      open={boardMenuOpen}
+      onToggle={toggleBoardMenu}
+      overlays={overlaysMenuContent}
+      learn={learnMenuContent}
+      playBot={playBotMenuContent}
+    />
   )
 
   return (
@@ -1367,39 +2189,13 @@ export default function App() {
       </header>
 
       <div className="layout">
-        <section className={`board-wrap${studyActive ? ' board-wrap--study' : ''}`}>
-          {studyActive && planData ? (
+        <section className={`board-wrap${walkthroughActive ? ' board-wrap--study' : ''}`}>
+          {walkthroughActive && planData ? (
             <div className="study-row">
               <div className="study-board-col">
-                <div className="capture-zone capture-zone--black">
-                  <div className="capture-zone-header">
-                    <span className="capture-zone-title">Black lost</span>
-                    <span className="material-score" aria-live="polite">
-                      <span className="material-score-label">Material taken</span>
-                      <span className="material-score-nums">
-                        {captureState.whitePts} – {captureState.blackPts}
-                      </span>
-                    </span>
-                  </div>
-                  <div
-                    className="capture-pieces"
-                    aria-label="Pieces White captured from Black"
-                  >
-                    {captureState.blackLost.length === 0 ? (
-                      <span className="capture-empty">—</span>
-                    ) : (
-                      captureState.blackLost.map((t, i) => (
-                        <span
-                          key={`bl-${i}-${t}`}
-                          className="capture-glyph capture-glyph--black"
-                          title={`Black ${t}`}
-                        >
-                          {GLYPH_BLACK[t] ?? t}
-                        </span>
-                      ))
-                    )}
-                  </div>
-                </div>
+                {showCapturedPieces ? (
+                  <CaptureZoneBar side="black" state={captureState} />
+                ) : null}
                 <div className="board-surface">
                   <Chessboard
                     options={{
@@ -1410,111 +2206,67 @@ export default function App() {
                       onSquareClick,
                       allowDragging: false,
                       allowAutoScroll: true,
-                      ...BOARD_NOTATION_OPTIONS,
+                      ...BOARD_CHESS_OPTIONS,
                     }}
                   />
                 </div>
-                <div className="capture-zone capture-zone--white">
-                  <div className="capture-zone-header">
-                    <span className="capture-zone-title">White lost</span>
-                    <span className="material-score" aria-live="polite">
-                      <span className="material-score-label">Material taken</span>
-                      <span className="material-score-nums">
-                        {captureState.whitePts} – {captureState.blackPts}
-                      </span>
-                    </span>
-                  </div>
-                  <div
-                    className="capture-pieces"
-                    aria-label="Pieces Black captured from White"
-                  >
-                    {captureState.whiteLost.length === 0 ? (
-                      <span className="capture-empty">—</span>
-                    ) : (
-                      captureState.whiteLost.map((t, i) => (
-                        <span
-                          key={`wl-${i}-${t}`}
-                          className="capture-glyph capture-glyph--white"
-                          title={`White ${t}`}
-                        >
-                          {GLYPH_WHITE[t] ?? t}
-                        </span>
-                      ))
-                    )}
-                  </div>
-                </div>
-                {overlaysPanel}
+                {showCapturedPieces ? (
+                  <CaptureZoneBar side="white" state={captureState} />
+                ) : null}
                 {planToolbar}
-                <p className="status">{statusLine}</p>
+                {boardMenu}
               </div>
-              <aside className="study-panel" aria-label="Study annotations">
-                <p className="plan-walkthrough-title">
-                  Studying: {studyTitle}
-                </p>
-                <div className="study-nav-modes" role="tablist" aria-label="Navigation mode">
-                  <button
-                    type="button"
-                    role="tab"
-                    aria-selected={studyNavMode === 'all'}
-                    className={
-                      studyNavMode === 'all' ? 'study-nav-mode--active' : ''
-                    }
-                    onClick={() => setStudyNavMode('all')}
-                  >
-                    Every move
-                  </button>
-                  <button
-                    type="button"
-                    role="tab"
-                    aria-selected={studyNavMode === 'highlights'}
-                    className={
-                      studyNavMode === 'highlights'
-                        ? 'study-nav-mode--active'
-                        : ''
-                    }
-                    onClick={() => setStudyNavMode('highlights')}
-                  >
-                    Key moments
-                  </button>
-                </div>
-                {studyJumpRow}
-                {planExplanation ?? (
-                  <p className="hint study-no-note">No note for this step.</p>
-                )}
-                {planStepList}
-              </aside>
+              <div className="study-stack">{studyPanel}</div>
             </div>
           ) : (
             <>
-              <div className="capture-zone capture-zone--black">
-                <div className="capture-zone-header">
-                  <span className="capture-zone-title">Black lost</span>
-                  <span className="material-score" aria-live="polite">
-                    <span className="material-score-label">Material taken</span>
-                    <span className="material-score-nums">
-                      {captureState.whitePts} – {captureState.blackPts}
+              {openingQuizActive && openingQuizProgress ? (
+                <div className="opening-quiz-banner" role="status" aria-live="polite">
+                  <div className="opening-quiz-banner-head">
+                    <strong>Opening quiz</strong>
+                    <span className="opening-quiz-banner-line">
+                      {openingQuizProgress.line.name}
+                      {openingQuizProgress.line.eco
+                        ? ` (${openingQuizProgress.line.eco})`
+                        : ''}
                     </span>
-                  </span>
-                </div>
-                <div
-                  className="capture-pieces"
-                  aria-label="Pieces White captured from Black"
-                >
-                  {captureState.blackLost.length === 0 ? (
-                    <span className="capture-empty">—</span>
+                  </div>
+                  <p className="opening-quiz-banner-detail">
+                    You play{' '}
+                    <strong>
+                      {openingQuizPlayColor === 'w' ? 'White' : 'Black'}
+                    </strong>
+                    . Opponent moves play automatically. Only book moves count.
+                  </p>
+                  {openingQuizComplete ? (
+                    <p className="opening-quiz-banner-success">
+                      Line complete — you matched all{' '}
+                      {openingQuizProgress.total} of your moves.
+                    </p>
                   ) : (
-                    captureState.blackLost.map((t, i) => (
-                      <span
-                        key={`bl-${i}-${t}`}
-                        className="capture-glyph capture-glyph--black"
-                        title={`Black ${t}`}
-                      >
-                        {GLYPH_BLACK[t] ?? t}
-                      </span>
-                    ))
+                    <p className="opening-quiz-banner-progress">
+                      Your move {openingQuizProgress.done + 1} of{' '}
+                      {openingQuizProgress.total}
+                    </p>
                   )}
+                  {openingQuizError ? (
+                    <p className="opening-quiz-banner-error">{openingQuizError}</p>
+                  ) : null}
+                  <div className="opening-quiz-banner-actions">
+                    <button type="button" onClick={endOpeningQuiz}>
+                      End quiz
+                    </button>
+                    {openingQuizComplete ? (
+                      <button type="button" className="primary" onClick={startOpeningQuiz}>
+                        Try again
+                      </button>
+                    ) : null}
+                  </div>
                 </div>
-              </div>
+              ) : null}
+              {showCapturedPieces ? (
+                <CaptureZoneBar side="black" state={captureState} />
+              ) : null}
               <div className="board-surface">
                 <Chessboard
                   options={{
@@ -1525,340 +2277,40 @@ export default function App() {
                     onSquareClick,
                     allowDragging: false,
                     allowAutoScroll: true,
-                    ...BOARD_NOTATION_OPTIONS,
+                    ...BOARD_CHESS_OPTIONS,
                   }}
                 />
                 {contactPopup && contactAnchor && !planViewActive ? (
                   <PieceContactTooltip contacts={contactPopup} anchor={contactAnchor} />
                 ) : null}
               </div>
-              <div className="capture-zone capture-zone--white">
-                <div className="capture-zone-header">
-                  <span className="capture-zone-title">White lost</span>
-                  <span className="material-score" aria-live="polite">
-                    <span className="material-score-label">Material taken</span>
-                    <span className="material-score-nums">
-                      {captureState.whitePts} – {captureState.blackPts}
-                    </span>
-                  </span>
-                </div>
-                <div
-                  className="capture-pieces"
-                  aria-label="Pieces Black captured from White"
-                >
-                  {captureState.whiteLost.length === 0 ? (
-                    <span className="capture-empty">—</span>
-                  ) : (
-                    captureState.whiteLost.map((t, i) => (
-                      <span
-                        key={`wl-${i}-${t}`}
-                        className="capture-glyph capture-glyph--white"
-                        title={`White ${t}`}
-                      >
-                        {GLYPH_WHITE[t] ?? t}
-                      </span>
-                    ))
-                  )}
-                </div>
-              </div>
-              {overlaysPanel}
-              {planViewActive && planData ? (
-                <div className="plan-walkthrough">
-                  <p className="plan-walkthrough-title">
-                    Walking through Stockfish&apos;s predicted line
-                  </p>
-                  {planToolbar}
-                  {planExplanation}
-                  {planStepList}
-                </div>
-              ) : (
-                <div className="board-toolbar">
-                  <button
-                    type="button"
-                    className="icon-btn"
-                    aria-label="Previous position"
-                    title="Step back through game moves"
-                    disabled={cursor === 0}
-                    onClick={historyBack}
-                  >
-                    ←
-                  </button>
-                  <button
-                    type="button"
-                    className="icon-btn"
-                    aria-label="Next position"
-                    title="Step forward through game moves"
-                    disabled={cursor === moves.length}
-                    onClick={historyForward}
-                  >
-                    →
-                  </button>
-                  <button
-                    type="button"
-                    onClick={undo}
-                    title={
-                      vsEngineMode !== 'off'
-                        ? 'Take back your last move and the engine reply (two plies)'
-                        : 'Remove the last move from the line'
-                    }
-                    disabled={cursor !== moves.length || moves.length === 0}
-                  >
-                    Undo
-                  </button>
-                  <button type="button" onClick={reset}>
-                    New game
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setBoardOrientation((o) => (o === 'white' ? 'black' : 'white'))
-                    }
-                  >
-                    Flip board
-                  </button>
-                </div>
-              )}
-              <p className="status">{statusLine}</p>
-              {!planViewActive ? (
-                <div className="opening-lines">
-                  <p className="status opening-line">
-                    <strong>White</strong>{' '}
-                    {whiteOpeningLabel ?? (
-                      <span className="opening-pending">—</span>
-                    )}
-                  </p>
-                  <p className="status opening-line">
-                    <strong>Black</strong>{' '}
-                    {blackOpeningLabel ?? (
-                      <span className="opening-pending">—</span>
-                    )}
-                  </p>
-                  {lineOpeningLabel &&
-                  lineOpeningLabel !== whiteOpeningLabel &&
-                  lineOpeningLabel !== blackOpeningLabel ? (
-                    <p className="status opening-line opening-line--full">
-                      <strong>Line</strong> {lineOpeningLabel}
-                    </p>
-                  ) : null}
-                </div>
+              {showCapturedPieces ? (
+                <CaptureZoneBar side="white" state={captureState} />
               ) : null}
-              <p className="hint board-hint">
-                Single-click any piece for orange threat/defense circles; then click a
-                green square to move yours. Double-click for defender/attacker list.
-                Use ← → to replay or branch.
-              </p>
-              {playStatus ? <p className="status play-status">{playStatus}</p> : null}
+              {planViewActive && planData ? (
+                <>
+                  {planToolbar}
+                  <div className="plan-walkthrough">
+                    <p className="plan-walkthrough-title">
+                      Walking through Stockfish&apos;s predicted line
+                    </p>
+                    {planExplanation}
+                    {planStepList}
+                  </div>
+                </>
+              ) : openingQuizActive ? (
+                quizBoardToolbar
+              ) : null}
+              {openingQuizActive && playStatus ? (
+                <p className="status play-status">{playStatus}</p>
+              ) : null}
+              {boardMenu}
               {analyzeError ? (
                 <p className="error">Analysis: {analyzeError}</p>
               ) : null}
             </>
           )}
         </section>
-
-        <aside className="sidebar">
-          <h2>Study famous games</h2>
-          <p className="hint">
-            Step through a classic game with visual-awareness notes (attack rings
-            and hanging pieces on the board).
-          </p>
-          <div className="field">
-            <label htmlFor="study-game">Game</label>
-            <select
-              id="study-game"
-              value={studyGameId}
-              disabled={studyLoading || planViewActive}
-              onChange={(e) => setStudyGameId(e.target.value)}
-            >
-              {studyCatalog.map((g) => (
-                <option key={g.id} value={g.id}>
-                  {g.name} ({g.year})
-                </option>
-              ))}
-            </select>
-          </div>
-          <button
-            type="button"
-            className="primary"
-            onClick={startStudy}
-            disabled={studyLoading || planViewActive || studyCatalog.length === 0}
-          >
-            {studyLoading ? 'Loading lesson…' : 'Start study walkthrough'}
-          </button>
-          {studyError ? <p className="error">{studyError}</p> : null}
-
-          <h2>Play vs engine</h2>
-          <div className="field">
-            <label htmlFor="vs-engine-mode">You play</label>
-            <select
-              id="vs-engine-mode"
-              value={vsEngineMode}
-              onChange={(e) => {
-                const mode = e.target.value as VsEngineMode
-                setVsEngineMode(mode)
-                setEnginePlayError(null)
-                setBoardOrientation(
-                  mode === 'engine_white' ? 'black' : 'white',
-                )
-              }}
-            >
-              <option value="engine_black">White (engine plays Black)</option>
-              <option value="engine_white">Black (engine plays White)</option>
-              <option value="off">Both sides (no engine)</option>
-            </select>
-          </div>
-          {vsEngineMode === 'engine_white' ? (
-            <div className="field">
-              <label htmlFor="white-opening">White opening (engine)</label>
-              <select
-                id="white-opening"
-                value={whiteOpeningPresetId}
-                disabled={moves.length > 0}
-                onChange={(e) => setWhiteOpeningPresetId(e.target.value)}
-              >
-                {WHITE_OPENING_PRESETS.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                  </option>
-                ))}
-              </select>
-              <p className="hint">
-                Pick before the first move. White follows this book line while
-                it matches; then Stockfish at engine depth. Start a new game to
-                change opening.
-              </p>
-            </div>
-          ) : null}
-          <p className="hint">
-            Engine replies use engine depth below. Your moves are scored at
-            depth {ACCURACY_DEPTH}.
-          </p>
-
-          <h2>Your accuracy</h2>
-          <p className="accuracy-panel" aria-live="polite">
-            {accuracyError ? (
-              <>Accuracy unavailable for the last move.</>
-            ) : accuracyLoading || accuracyPendingIdx >= 0 ? (
-              <>Scoring your move (depth {ACCURACY_DEPTH})…</>
-            ) : accuracySummary.accuracyPercent != null ? (
-              <>
-                <strong>{accuracySummary.accuracyPercent}%</strong>
-                {' · '}
-                {accuracySummary.scored.length} move
-                {accuracySummary.scored.length === 1 ? '' : 's'}
-                {accuracySummary.avgCpLoss != null
-                  ? ` · avg ${accuracySummary.avgCpLoss} cp loss`
-                  : ''}
-              </>
-            ) : (
-              <>Play a move to start accuracy tracking.</>
-            )}
-          </p>
-          {accuracySummary.last ? (
-            <p className="hint accuracy-last">
-              Last move:{' '}
-              <strong>
-                {classificationLabel(accuracySummary.last.classification)}
-              </strong>
-              {accuracySummary.last.cp_loss > 0
-                ? ` (+${accuracySummary.last.cp_loss} cp vs best)`
-                : accuracySummary.last.played_uci ===
-                    accuracySummary.last.best_uci
-                  ? ' (engine best)'
-                  : ''}
-            </p>
-          ) : null}
-          <p className="hint">
-            Accuracy uses Stockfish depth {ACCURACY_DEPTH}. Engine moves and
-            analysis below use engine depth ({engineDepth}).
-          </p>
-          {accuracyError ? (
-            <p className="error">{accuracyError}</p>
-          ) : null}
-
-          <h2>Stockfish</h2>
-          <p className="engine-meta">
-            Engine:{' '}
-            {engineOk === null
-              ? 'checking…'
-              : engineOk
-                ? `ok (${enginePath})`
-                : `unavailable (${enginePath})`}
-          </p>
-          <div className="field">
-            <label htmlFor="engine-depth">Engine depth</label>
-            <input
-              id="engine-depth"
-              type="number"
-              min={1}
-              max={40}
-              value={engineDepth}
-              onChange={(e) =>
-                setEngineDepth(Number(e.target.value) || ENGINE_DEPTH_DEFAULT)
-              }
-            />
-          </div>
-          <button
-            type="button"
-            className="primary"
-            onClick={runEval}
-            disabled={evalLoading || planLoading || engineMoveLoading}
-          >
-            {evalLoading ? 'Stockfish is thinking…' : 'Evaluate position'}
-          </button>
-          <button
-            type="button"
-            className="primary secondary"
-            onClick={runPlan}
-            disabled={planLoading || evalLoading || engineMoveLoading}
-            title="Stockfish main line; step through on the board. English story needs server OpenAI key."
-          >
-            {planLoading
-              ? openaiConfigured
-                ? 'Stockfish + AI explanation…'
-                : 'Stockfish is building the line…'
-              : 'Explain & walk plan'}
-          </button>
-          {openaiConfigured === false ? (
-            <p className="hint">
-              AI explanations need <code>OPENAI_API_KEY</code> on the server
-              (repo-root <code>.env</code>). Walk-through without text still works.
-            </p>
-          ) : null}
-          {planError ? <p className="error">{planError}</p> : null}
-          {evalError ? <p className="error">{evalError}</p> : null}
-          {planData?.narrative ? (
-            <div className="plan-narrative">
-              <h3>Full engine story</h3>
-              <p className="hint">
-                Step through the board to read one move at a time above the list.
-              </p>
-              <div className="plan-narrative-body">{planData.narrative}</div>
-              {planData.summary ? (
-                <p className="plan-summary">
-                  <strong>Bottom line:</strong> {planData.summary}
-                </p>
-              ) : null}
-              {planData.explain_error ? (
-                <p className="error">{planData.explain_error}</p>
-              ) : null}
-            </div>
-          ) : null}
-          {evalResult ? (
-            <div className="eval-out">
-              <div>
-                <strong>Eval</strong> {formatEval(evalResult)}
-              </div>
-              <div>
-                <strong>Best</strong> {evalResult.bestmove_uci ?? '—'}
-              </div>
-              {evalResult.pv_uci.length ? (
-                <div className="pv">
-                  <strong>PV</strong> {evalResult.pv_uci.slice(0, 8).join(' ')}
-                </div>
-              ) : null}
-            </div>
-          ) : null}
-        </aside>
       </div>
     </div>
   )

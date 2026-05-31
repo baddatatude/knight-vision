@@ -9,7 +9,9 @@
  *   https://api.knight-vision.example
  */
 export function getApiBase(): string {
-  const raw = import.meta.env.VITE_API_BASE as string | undefined
+  const raw =
+    (import.meta.env.VITE_API_BASE as string | undefined) ||
+    (import.meta.env.VITE_API_BASE_URL as string | undefined)
   if (!raw) return ''
   return raw.replace(/\/$/, '')
 }
